@@ -1,36 +1,69 @@
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import type { Mounter } from '../types';
+import React from "react";
+import { createRoot, type Root } from "react-dom/client";
+import type { Mounter } from "../types";
 
-export function createDomTreeMounter(defaultMountNode?: Element | DocumentFragment | HTMLElement): Mounter {
-  const confirms: Record<string, HTMLElement> = {};
+type ConfirmationEntry = {
+  wrapper: HTMLElement;
+  root: Root;
+};
+
+export function createDomTreeMounter(
+  defaultMountNode?: Element | DocumentFragment | HTMLElement
+): Mounter {
+  const confirms: Record<string, ConfirmationEntry> = {};
   const callbacks: { mounted?: () => void } = {};
 
-  function mount(Component: React.ComponentType<any>, props: any, mountNode?: HTMLElement) {
-    const key = Math.floor(Math.random() * (1 << 30)).toString(16);
-    const parent = (mountNode || (defaultMountNode as Element | DocumentFragment) || document.body) as Element | DocumentFragment;
-    const wrapper = parent.appendChild(document.createElement('div'));
-    confirms[key] = wrapper;
+  const generateKey = () => Math.floor(Math.random() * (1 << 30)).toString(16);
 
-    const root = createRoot(wrapper);
-    root.render(<Component {...props} />);
-    callbacks.mounted && callbacks.mounted();
-    return key;
-  }
+  const getParentNode = (mountNode?: HTMLElement) =>
+    (mountNode || defaultMountNode || document.body) as
+      | Element
+      | DocumentFragment;
 
-  function unmount(key: string) {
-    const wrapper = confirms[key];
-    delete confirms[key];
+  function mount(
+    Component: React.ComponentType<any>,
+    props: any,
+    mountNode?: HTMLElement
+  ): string {
+    const key = generateKey();
 
-    if (wrapper && wrapper.parentNode) {
-      wrapper.parentNode.removeChild(wrapper);
+    try {
+      const parent = getParentNode(mountNode);
+      const wrapper = parent.appendChild(document.createElement("div"));
+      const root = createRoot(wrapper);
+
+      confirms[key] = { wrapper, root };
+      root.render(<Component {...props} />);
+      callbacks.mounted?.();
+
+      return key;
+    } catch (error) {
+      delete confirms[key];
+      throw error;
     }
   }
 
-  return ({
+  function unmount(key: string): void {
+    const confirmation = confirms[key];
+    if (!confirmation) return;
+
+    delete confirms[key];
+
+    try {
+      confirmation.root.unmount();
+    } catch (error) {
+      console.warn("react-confirm: Failed to unmount React root:", error);
+    }
+    try {
+      confirmation.wrapper.remove();
+    } catch (error) {
+      console.warn("react-confirm: Failed to remove DOM wrapper:", error);
+    }
+  }
+
+  return {
     mount,
     unmount,
-    // keep runtime `options` for backward-compat; not part of public type
-    options: {},
-  } as unknown) as Mounter;
+    options: {}, // Keep for backward compatibility
+  } as unknown as Mounter;
 }
